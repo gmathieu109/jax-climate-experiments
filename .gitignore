@@ -1,0 +1,16 @@
+# archives
+00_archive/
+
+# heavy data
+*.nc
+*.zarr
+
+# outputs
+*.png
+*.csv
+
+# jupyter
+.ipynb_checkpoints/
+
+# system
+.DS_Store
