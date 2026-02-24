@@ -27,3 +27,6 @@ venvs/
 02_analysis/compare_out_*/
 *.png
 notebooks/
+
+# Archive (do not version)
+00_archive/
