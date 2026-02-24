@@ -1,16 +1,24 @@
-# archives
-00_archive/
-
-# heavy data
-*.nc
-*.zarr
-
-# outputs
-*.png
-*.csv
-
-# jupyter
+# Jupyter
 .ipynb_checkpoints/
 
-# system
-.DS_Store
+# Python
+__pycache__/
+*.pyc
+
+# Data / outputs
+**/compare_out_test/
+**/outputs/
+**/*.nc
+**/*.zarr
+**/*.grib
+**/*.log
+slurm-*.out
+*.out
+*.err
+
+# Envs / caches
+venv/
+venvs/
+.cache/
+.vscode/
+.vscode-server/
