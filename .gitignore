@@ -22,3 +22,4 @@ venvs/
 .cache/
 .vscode/
 .vscode-server/
+.ipynb_checkpoints/
