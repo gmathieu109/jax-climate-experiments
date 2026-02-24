@@ -30,3 +30,16 @@ notebooks/
 
 # Archive (do not version)
 00_archive/
+
+# --- local analysis outputs / scratch scripts (do not commit) ---
+02_analysis/ps_rmse_compare_full_vs_dino.csv
+02_analysis/ps_rmse_vs_time_full.csv
+02_analysis/rmse_snapshot_t0.csv
+02_analysis/make_era5_and_rmse.py
+02_analysis/rmse_snapshot_offline.py
+02_analysis/*.csv
+
+# Local analysis scratch
+02_analysis/*.csv
+02_analysis/make_era5_and_rmse.py
+02_analysis/rmse_snapshot_offline.py
