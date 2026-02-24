@@ -43,3 +43,4 @@ notebooks/
 02_analysis/*.csv
 02_analysis/make_era5_and_rmse.py
 02_analysis/rmse_snapshot_offline.py
+02_analysis/jax_gcm/
