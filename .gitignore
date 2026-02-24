@@ -23,3 +23,7 @@ venvs/
 .vscode/
 .vscode-server/
 .ipynb_checkpoints/
+02_analysis/out_*/
+02_analysis/compare_out_*/
+*.png
+notebooks/
