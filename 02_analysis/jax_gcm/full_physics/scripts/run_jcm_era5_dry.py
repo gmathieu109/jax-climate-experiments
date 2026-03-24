@@ -71,13 +71,26 @@ def main():
                         help="Output netCDF path (default: jcm_dry_run.nc)")
     parser.add_argument("--init_time", default="2000-01-01T00:00:00",
                         help="ERA5 initialisation time (default: 2000-01-01T00:00:00)")
+    parser.add_argument(
+        "--outdir",
+        default=None,
+        help="Experiment output directory. Final .nc will be saved in outdir/run_nc/",
+    )
     args = parser.parse_args()
 
     total_days = args.total_days
     chunk_days = args.chunk_days
     save_interval = args.save_interval
-    out_path = Path(args.output)
+    if args.outdir is not None:
+        base_outdir = Path(args.outdir)
+        run_nc_dir = base_outdir / "run_nc"
+        run_nc_dir.mkdir(parents=True, exist_ok=True)
 
+        out_path = run_nc_dir / Path(args.output).name
+    else:
+        out_path = Path(args.output)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     chunk_dir = out_path.parent / f"{out_path.stem}_chunks"
     chunk_dir.mkdir(parents=True, exist_ok=True)
 

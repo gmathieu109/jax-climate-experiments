@@ -211,8 +211,8 @@ def era5_doy_climatology(ds_era5):
 
 # Plotting
 
-def plot_comparison(ds_era5, ds_full, ds_dry, jcm_is_clim, out_path):
-    """Plot Full and Dry against ERA5."""
+def plot_comparison(ds_era5, ds_full_raw, ds_dry_raw, ds_full, ds_dry, jcm_is_clim, out_path):
+    """Plot Full and Dry against ERA5, with std bands in climatology mode."""
     clim_mean, clim_std = era5_doy_climatology(ds_era5)
 
     region_names = list(REGIONS.keys())
@@ -222,21 +222,36 @@ def plot_comparison(ds_era5, ds_full, ds_dry, jcm_is_clim, out_path):
         axes = [axes]
 
     if jcm_is_clim:
+        full_clim_mean, full_clim_std = jcm_doy_climatology(ds_full_raw)
+        dry_clim_mean, dry_clim_std = jcm_doy_climatology(ds_dry_raw)
+
         doys = clim_mean.dayofyear.values
-        full_doys = ds_full.dayofyear.values
-        dry_doys = ds_dry.dayofyear.values
+        full_doys = full_clim_mean.dayofyear.values
+        dry_doys = dry_clim_mean.dayofyear.values
 
         for ax, region in zip(axes, region_names):
             cm = clim_mean[region].values
             cs = clim_std[region].values
 
+            fm = full_clim_mean[region].values
+            fs = full_clim_std[region].values
+
+            dm = dry_clim_mean[region].values
+            ds = dry_clim_std[region].values
+
             ax.fill_between(doys, cm - cs, cm + cs,
                             color="grey", alpha=0.25, label="ERA5 clim ±1σ")
-            ax.plot(doys, cm, color="black", lw=1.1, label="ERA5 clim mean")
-            ax.plot(full_doys, ds_full[region].values,
-                    color="firebrick", lw=1.8, label="Full")
-            ax.plot(dry_doys, ds_dry[region].values,
-                    color="steelblue", lw=1.8, label="Dry")
+            ax.plot(doys, cm, color="black", lw=1.2, label="ERA5 clim mean")
+
+            ax.fill_between(full_doys, fm - fs, fm + fs,
+                            color="firebrick", alpha=0.20, label="Full clim ±1σ")
+            ax.plot(full_doys, fm,
+                    color="firebrick", lw=1.8, label="Full clim mean")
+
+            ax.fill_between(dry_doys, dm - ds, dm + ds,
+                            color="steelblue", alpha=0.20, label="Dry clim ±1σ")
+            ax.plot(dry_doys, dm,
+                    color="steelblue", lw=1.8, label="Dry clim mean")
 
             ax.set_ylabel("T (K)")
             ax.set_title(region, fontsize=11, fontweight="bold")
@@ -358,13 +373,28 @@ def plot_bias_both(ds_era5, ds_full, ds_dry, jcm_is_clim, out_path):
 
 def plot_bias_map(da_era5_field, da_jcm_field, out_path, title):
     """Plot global lat-lon map of JCM − ERA5 bias (time mean at ~850 hPa)."""
+
+    era_start = np.datetime64(da_era5_field.time.values[0], "D")
+    era_end   = np.datetime64(da_era5_field.time.values[-1], "D")
     jcm_start = np.datetime64(da_jcm_field.time.values[0], "D")
-    jcm_end = np.datetime64(da_jcm_field.time.values[-1], "D")
-    da_era5_overlap = da_era5_field.sel(time=slice(jcm_start, jcm_end))
-    da_era5_overlap = da_era5_overlap.sel(time=da_jcm_field.time)
+    jcm_end   = np.datetime64(da_jcm_field.time.values[-1], "D")
+
+    t0 = max(era_start, jcm_start)
+    t1 = min(era_end, jcm_end)
+
+    if t1 < t0:
+        raise ValueError("No overlapping time range between JCM and ERA5 for bias map.")
+
+    da_jcm_overlap = da_jcm_field.sel(time=slice(t0, t1))
+    da_era5_overlap = da_era5_field.sel(time=slice(t0, t1))
+
+    da_era5_overlap = da_era5_overlap.sel(
+        time=da_jcm_overlap.time,
+        method="nearest",
+    )
 
     era_mean = da_era5_overlap.mean(dim="time")
-    jcm_mean = da_jcm_field.mean(dim="time")
+    jcm_mean = da_jcm_overlap.mean(dim="time")
 
     bias = jcm_mean - era_mean
     bias = bias.transpose("lat", "lon")
@@ -390,6 +420,73 @@ def plot_bias_map(da_era5_field, da_jcm_field, out_path, title):
     plt.tight_layout()
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     print(f"Saved bias map → {out_path}")
+    plt.close(fig)
+
+def jcm_doy_climatology(ds_jcm):
+    """Day-of-year mean ± std from multi-year JCM daily regional means."""
+    doy = ds_jcm.time.dt.dayofyear
+    return ds_jcm.groupby(doy).mean(dim="time"), ds_jcm.groupby(doy).std(dim="time")
+
+def plot_bias_map_seasonal(da_era5_field, da_jcm_field, season, out_path, title):
+    """Plot seasonal lat-lon map of JCM − ERA5 bias (~850 hPa)."""
+
+    season_months = {
+        "DJF": [12, 1, 2],
+        "JJA": [6, 7, 8],
+    }
+    if season not in season_months:
+        raise ValueError(f"Unsupported season: {season}")
+
+    era_start = np.datetime64(da_era5_field.time.values[0], "D")
+    era_end   = np.datetime64(da_era5_field.time.values[-1], "D")
+    jcm_start = np.datetime64(da_jcm_field.time.values[0], "D")
+    jcm_end   = np.datetime64(da_jcm_field.time.values[-1], "D")
+
+    t0 = max(era_start, jcm_start)
+    t1 = min(era_end, jcm_end)
+
+    if t1 < t0:
+        raise ValueError("No overlapping time range between JCM and ERA5 for seasonal bias map.")
+
+    da_jcm_overlap = da_jcm_field.sel(time=slice(t0, t1))
+    da_era5_overlap = da_era5_field.sel(time=slice(t0, t1))
+
+    da_era5_overlap = da_era5_overlap.sel(
+        time=da_jcm_overlap.time,
+        method="nearest",
+    )
+
+    months = season_months[season]
+    da_jcm_season = da_jcm_overlap.where(da_jcm_overlap.time.dt.month.isin(months), drop=True)
+    da_era5_season = da_era5_overlap.where(da_era5_overlap.time.dt.month.isin(months), drop=True)
+
+    era_mean = da_era5_season.mean(dim="time")
+    jcm_mean = da_jcm_season.mean(dim="time")
+
+    bias = jcm_mean - era_mean
+    bias = bias.transpose("lat", "lon")
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+    im = ax.pcolormesh(
+        bias.lon,
+        bias.lat,
+        bias,
+        cmap="RdBu_r",
+        vmin=-10,
+        vmax=10,
+        shading="auto",
+    )
+
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label("Bias (K)")
+
+    ax.set_title(title)
+    ax.set_xlabel("Longitude")
+    ax.set_ylabel("Latitude")
+
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    print(f"Saved seasonal bias map → {out_path}")
     plt.close(fig)
 
 
@@ -427,7 +524,9 @@ def main():
 
     CACHE_DIR.mkdir(exist_ok=True)
     outdir = Path(args.outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+    graphs_dir = outdir / "graphs_png"
+
+    graphs_dir.mkdir(parents=True, exist_ok=True)
 
     era5_field_cache = CACHE_DIR / "era5_T850_daily_on_jcm_grid.nc"
     era5_regional_cache = CACHE_DIR / "era5_regional_T850_daily.nc"
@@ -499,25 +598,28 @@ def main():
     if full_is_clim != dry_is_clim:
         raise ValueError("Full and Dry do not produce the same comparison mode (climatology vs raw).")
 
-    da_full_field_post, _, _ = discard_spinup_and_climatologize(
-        da_full_field.to_dataset(name="temperature"),
-        args.spinup_days,
-    )
-    da_full_field_post = da_full_field_post["temperature"]
+    # Post-spinup raw fields for maps (keep time dimension)
+    if len(da_full_field.time) <= args.spinup_days:
+        print("WARNING: not enough Full data for spin-up removal in map field; using full field.")
+        da_full_field_post = da_full_field
+    else:
+        da_full_field_post = da_full_field.isel(time=slice(args.spinup_days, None))
 
-    da_dry_field_post, _, _ = discard_spinup_and_climatologize(
-        da_dry_field.to_dataset(name="temperature"),
-        args.spinup_days,
-    )
-    da_dry_field_post = da_dry_field_post["temperature"]
+    if len(da_dry_field.time) <= args.spinup_days:
+        print("WARNING: not enough Dry data for spin-up removal in map field; using full field.")
+        da_dry_field_post = da_dry_field
+    else:
+        da_dry_field_post = da_dry_field.isel(time=slice(args.spinup_days, None))
 
     # Plots
     plot_comparison(
         ds_era5,
+        ds_full_raw,
+        ds_dry_raw,
         ds_full,
         ds_dry,
         full_is_clim,
-        out_path=outdir / "eval_era5_full_dry.png",
+        out_path=graphs_dir / "eval_era5_full_dry.png",
     )
 
     plot_bias_both(
@@ -525,26 +627,75 @@ def main():
         ds_full,
         ds_dry,
         full_is_clim,
-        out_path=outdir / "bias_full_and_dry_minus_era5.png",
+        out_path=graphs_dir / "bias_full_and_dry_minus_era5.png",
     )
 
     if not full_is_clim:
         plot_bias_map(
             da_era5,
             da_full_field_post,
-            out_path=outdir / "bias_map_full_minus_era5.png",
+            out_path=graphs_dir / "bias_map_full_minus_era5.png",
             title="Full − ERA5 Time-Mean Temperature Bias (850 hPa)",
         )
 
         plot_bias_map(
             da_era5,
             da_dry_field_post,
-            out_path=outdir / "bias_map_dry_minus_era5.png",
+            out_path=graphs_dir / "bias_map_dry_minus_era5.png",
             title="Dry − ERA5 Time-Mean Temperature Bias (850 hPa)",
         )
     else:
         print("Skipping bias maps for climatology mode (current map plot expects a time dimension).")
 
+    plot_bias_map_seasonal(
+        da_era5,
+        da_full_field_post,
+        season="DJF",
+        out_path=graphs_dir / "bias_map_full_minus_era5_DJF.png",
+        title="Full − ERA5 Temperature Bias (850 hPa, DJF)",
+    )
+
+    plot_bias_map_seasonal(
+        da_era5,
+        da_full_field_post,
+        season="JJA",
+        out_path=graphs_dir / "bias_map_full_minus_era5_JJA.png",
+        title="Full − ERA5 Temperature Bias (850 hPa, JJA)",
+    )
+
+    plot_bias_map_seasonal(
+        da_era5,
+        da_dry_field_post,
+        season="DJF",
+        out_path=graphs_dir / "bias_map_dry_minus_era5_DJF.png",
+        title="Dry − ERA5 Temperature Bias (850 hPa, DJF)",
+    )
+
+    plot_bias_map_seasonal(
+        da_era5,
+        da_dry_field_post,
+        season="JJA",
+        out_path=graphs_dir / "bias_map_dry_minus_era5_JJA.png",
+        title="Dry − ERA5 Temperature Bias (850 hPa, JJA)",
+    )
+
+    #Write README
+    readme_path = outdir / "README.txt"
+    with open(readme_path, "w") as f:
+        f.write(f"""Experiment: Full vs Dry (physics=None)
+    Full file: {args.full}
+    Dry file: {args.dry}
+
+    Spin-up removed: {args.spinup_days} days
+
+    Outputs:
+    - run_nc/: processed datasets
+    - graphs_png/: figures
+
+    Notes:
+    - Dry = no physics
+    - Strong cold drift expected
+    """)
 
 if __name__ == "__main__":
     main()

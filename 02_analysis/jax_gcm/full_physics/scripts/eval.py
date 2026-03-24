@@ -211,7 +211,7 @@ def era5_doy_climatology(ds_era5):
 
 # Plotting 
 
-def plot_comparison(ds_era5, ds_jcm, jcm_is_clim, out_path):
+def plot_comparison(ds_era5, ds_jcm_raw, ds_jcm, jcm_is_clim, out_path):
     """Plot JCM vs ERA5. Adapts to climatology or raw daily JCM data."""
     clim_mean, clim_std = era5_doy_climatology(ds_era5)
 
@@ -222,17 +222,25 @@ def plot_comparison(ds_era5, ds_jcm, jcm_is_clim, out_path):
         axes = [axes]
 
     if jcm_is_clim:
+        jcm_clim_mean, jcm_clim_std = jcm_doy_climatology(ds_jcm_raw)
+
         doys = clim_mean.dayofyear.values
-        jcm_doys = ds_jcm.dayofyear.values
+        jcm_doys = jcm_clim_mean.dayofyear.values
 
         for ax, region in zip(axes, region_names):
             cm = clim_mean[region].values
             cs = clim_std[region].values
 
+            jm = jcm_clim_mean[region].values
+            js = jcm_clim_std[region].values
+
             ax.fill_between(doys, cm - cs, cm + cs,
                             color="grey", alpha=0.25, label="ERA5 clim ±1σ")
-            ax.plot(doys, cm, color="steelblue", lw=1.2, label="ERA5 clim mean")
-            ax.plot(jcm_doys, ds_jcm[region].values,
+            ax.plot(doys, cm, color="black", lw=1.2, label="ERA5 clim mean")
+
+            ax.fill_between(jcm_doys, jm - js, jm + js,
+                            color="firebrick", alpha=0.20, label="JCM clim ±1σ")
+            ax.plot(jcm_doys, jm,
                     color="firebrick", lw=1.8, label="JCM clim mean")
 
             ax.set_ylabel("T (K)")
@@ -267,7 +275,7 @@ def plot_comparison(ds_era5, ds_jcm, jcm_is_clim, out_path):
 
             if len(era5_overlap.time) > 0:
                 ax.plot(era5_overlap.time.values, era5_overlap[region].values,
-                        color="steelblue", lw=1.3, label=f"ERA5 {jcm_year}")
+                        color="black", lw=1.3, label=f"ERA5 {jcm_year}")
 
             ax.plot(jcm_times, ds_jcm[region].values,
                     color="firebrick", lw=1.5, label="JCM")
@@ -289,58 +297,88 @@ def plot_comparison(ds_era5, ds_jcm, jcm_is_clim, out_path):
     print(f"Saved plot → {out_path}")
     plt.close(fig)
 
-def plot_bias(ds_era5, ds_jcm, out_path):
+def plot_bias(ds_era5, ds_jcm_raw, ds_jcm, jcm_is_clim, out_path):
     """Plot JCM − ERA5 bias for regional mean temperature."""
 
-    import matplotlib.pyplot as plt
-
     regions = list(ds_jcm.data_vars)
-
     n = len(regions)
     fig, axes = plt.subplots(n, 1, figsize=(12, 3.2*n), sharex=True)
 
     if n == 1:
         axes = [axes]
 
-    for ax, region in zip(axes, regions):
+    if jcm_is_clim:
+        era5_clim_mean, _ = era5_doy_climatology(ds_era5)
+        jcm_clim_mean, _ = jcm_doy_climatology(ds_jcm_raw)
 
-        era = ds_era5[region]
-        jcm = ds_jcm[region]
+        for ax, region in zip(axes, regions):
+            era = era5_clim_mean[region].sel(dayofyear=jcm_clim_mean.dayofyear)
+            jcm = jcm_clim_mean[region]
 
-        # align times
-        era = era.sel(time=jcm.time)
+            bias = jcm - era
 
-        bias = jcm - era
+            ax.axhline(0, color="black", lw=0.8)
+            ax.plot(jcm.dayofyear.values, bias.values, color="purple", lw=2)
 
-        ax.axhline(0, color="black", lw=0.8)
-        ax.plot(jcm.time.values, bias.values, color="purple", lw=2)
+            ax.set_ylabel("Bias (K)")
+            ax.set_title(region, fontsize=11, fontweight="bold")
+            ax.grid(True, alpha=0.3)
 
-        ax.set_ylabel("Bias (K)")
-        ax.set_title(region, fontsize=11, fontweight="bold")
-        ax.grid(True, alpha=0.3)
+        axes[-1].set_xlabel("Day of year")
+        fig.suptitle("JCM − ERA5 Temperature Bias Climatology (850 hPa)", fontsize=14)
 
-    fig.suptitle("JCM − ERA5 Temperature Bias (850 hPa)", fontsize=14)
+    else:
+        for ax, region in zip(axes, regions):
+            era = ds_era5[region]
+            jcm = ds_jcm[region]
+
+            era = era.sel(time=jcm.time)
+            bias = jcm - era
+
+            ax.axhline(0, color="black", lw=0.8)
+            ax.plot(jcm.time.values, bias.values, color="purple", lw=2)
+
+            ax.set_ylabel("Bias (K)")
+            ax.set_title(region, fontsize=11, fontweight="bold")
+            ax.grid(True, alpha=0.3)
+
+        axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
+        fig.suptitle("JCM − ERA5 Temperature Bias (850 hPa)", fontsize=14)
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     print(f"Saved bias plot → {out_path}")
+    plt.close(fig)
 
 def plot_bias_map(da_era5_field, da_jcm_field, out_path):
     """Plot global lat-lon map of JCM − ERA5 bias (time mean at 850 hPa)."""
 
     import matplotlib.pyplot as plt
 
-    # Align time range
+    # Common overlapping period only
+    era_start = np.datetime64(da_era5_field.time.values[0], "D")
+    era_end   = np.datetime64(da_era5_field.time.values[-1], "D")
     jcm_start = np.datetime64(da_jcm_field.time.values[0], "D")
     jcm_end   = np.datetime64(da_jcm_field.time.values[-1], "D")
-    da_era5_overlap = da_era5_field.sel(time=slice(jcm_start, jcm_end))
 
-    # Align exact timestamps if possible
-    da_era5_overlap = da_era5_overlap.sel(time=da_jcm_field.time)
+    t0 = max(era_start, jcm_start)
+    t1 = min(era_end, jcm_end)
+
+    if t1 < t0:
+        raise ValueError("No overlapping time range between JCM and ERA5 for bias map.")
+
+    da_jcm_overlap = da_jcm_field.sel(time=slice(t0, t1))
+    da_era5_overlap = da_era5_field.sel(time=slice(t0, t1))
+
+    # Match ERA5 to JCM timestamps
+    da_era5_overlap = da_era5_overlap.sel(
+        time=da_jcm_overlap.time,
+        method="nearest",
+    )
 
     # Time mean
     era_mean = da_era5_overlap.mean(dim="time")
-    jcm_mean = da_jcm_field.mean(dim="time")
+    jcm_mean = da_jcm_overlap.mean(dim="time")
 
     bias = jcm_mean - era_mean
     bias = bias.transpose("lat", "lon")
@@ -369,6 +407,11 @@ def plot_bias_map(da_era5_field, da_jcm_field, out_path):
     print(f"Saved bias map → {out_path}")
     plt.close(fig)
 
+def jcm_doy_climatology(ds_jcm):
+    """Day-of-year mean ± std from multi-year JCM daily regional means."""
+    doy = ds_jcm.time.dt.dayofyear
+    return ds_jcm.groupby(doy).mean(dim="time"), ds_jcm.groupby(doy).std(dim="time")
+
 # ── Main ──────────────────────────────────────────────────────────────────
 
 def main():
@@ -379,6 +422,11 @@ def main():
                         help="Days to discard as spin-up (default: 365)")
     parser.add_argument("--recompute", action="store_true",
                         help="Force recompute even if cache exists")
+    parser.add_argument(
+        "--outdir",
+        default=None,
+        help="Directory where output figures will be saved. Figures go to outdir/graphs_png/",
+    )
     args = parser.parse_args()
 
     CACHE_DIR.mkdir(exist_ok=True)
@@ -427,34 +475,44 @@ def main():
     print("\nProcessing JCM spin-up …")
     ds_jcm, n_years, jcm_is_clim = discard_spinup_and_climatologize(ds_jcm_raw, args.spinup_days)
 
-    da_jcm_field_post, _, _ = discard_spinup_and_climatologize(
-        da_jcm_field.to_dataset(name="temperature"),
-        args.spinup_days
-    )
-    da_jcm_field_post = da_jcm_field_post["temperature"]
+    # Post-spinup raw field for maps (keep time dimension)
+    if len(da_jcm_field.time) <= args.spinup_days:
+        print("WARNING: not enough data for spin-up removal in map field; using full field.")
+        da_jcm_field_post = da_jcm_field
+    else:
+        da_jcm_field_post = da_jcm_field.isel(time=slice(args.spinup_days, None))
 
     # ── Compare ──
 
 
-    outdir = Path(args.jcm).parent
+    if args.outdir is not None:
+        outdir = Path(args.outdir)
+    else:
+        outdir = Path(args.jcm).parent
+
+    graphs_dir = outdir / "graphs_png"
+    graphs_dir.mkdir(parents=True, exist_ok=True)
 
     plot_comparison(
         ds_era5,
+        ds_jcm_raw,
         ds_jcm,
         jcm_is_clim,
-        out_path=outdir / "eval_era5_vs_jcm.png"
+        out_path=graphs_dir / "eval_era5_vs_jcm.png"
     )
 
     plot_bias(
         ds_era5,
+        ds_jcm_raw,
         ds_jcm,
-        out_path=outdir / "bias_jcm_minus_era5.png"
+        jcm_is_clim,
+        out_path=graphs_dir / "bias_jcm_minus_era5.png"
     )
 
     plot_bias_map(
         da_era5,
         da_jcm_field_post,
-        out_path=outdir / "bias_map_jcm_minus_era5.png"
+        out_path=graphs_dir / "bias_map_jcm_minus_era5.png"
     )
 
 if __name__ == "__main__":
