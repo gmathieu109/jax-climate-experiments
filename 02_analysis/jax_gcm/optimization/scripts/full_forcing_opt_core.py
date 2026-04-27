@@ -155,6 +155,8 @@ def make_modified_forcing(
     u_snow: jnp.ndarray,
     use_albedo: bool = False,
     u_alb: jnp.ndarray | None = None,
+    use_sst: bool = False,
+    u_sst: jnp.ndarray | None = None,
 ) -> tuple[ForcingData, dict]:
     """
     Return forcing with pixel-wise scaled snowc_am, and optionally alb0.
@@ -174,6 +176,22 @@ def make_modified_forcing(
         alb0_new = jnp.clip(alpha_alb * forcing.alb0, 0.0, 1.0)
         forcing_new = forcing_new.copy(alb0=alb0_new)
         info["alpha_alb"] = alpha_alb
+
+    if use_sst:
+        if u_sst is None:
+            raise ValueError("use_sst=True but u_sst is None")
+
+        # shape: (lon, lat, time)
+        sst = forcing.sea_surface_temperature
+
+        # broadcast (lon, lat) → (lon, lat, time)
+        sst_new = sst + u_sst[:, :, None]
+
+        forcing_new = forcing_new.copy(
+            sea_surface_temperature=sst_new
+        )
+
+        info["delta_sst"] = u_sst
 
     return forcing_new, info
 
