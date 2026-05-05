@@ -121,64 +121,69 @@ def main():
         reg_lat = jnp.mean((field_2d[:, 1:] - field_2d[:, :-1]) ** 2)
         return reg_lon + reg_lat
 
-    def loss_fn(params):
-        u_sst = params["u_sst"]
-        delta_sst = 2.0 * jnp.tanh(u_sst)
-        total_loss = 0.0
+def loss_fn(params):
+    u_sst = params["u_sst"]
+    delta_sst = 2.0 * jnp.tanh(u_sst)
 
-        for init_time in INIT_TIMES:
-            # rebuild setup pour chaque fenêtre
-            setup = make_full_setup(init_time=init_time)
+    total_rmse = 0.0
 
-            # target ERA5
-            target_t850, _, _ = load_era5_target_t850(
-                setup.coords,
-                init_time=init_time,
-                total_days=args.total_days,
-            )
+    # ------------------------
+    # Loop over init times
+    # ------------------------
+    for init_time in INIT_TIMES:
+        setup = make_full_setup(init_time=init_time)
 
-            # forcing modifié
-            dummy_u_snow = jnp.zeros_like(setup.forcing.alb0)
+        target_t850, _, _ = load_era5_target_t850(
+            setup.coords,
+            init_time=init_time,
+            total_days=args.total_days,
+        )
 
-            forcing_mod, _ = make_modified_forcing(
-                setup.forcing,
-                u_snow=dummy_u_snow,
-                use_sst=True,
-                u_sst=delta_sst,
-            )
+        dummy_u_snow = jnp.zeros_like(setup.forcing.alb0)
 
-            # run modèle
-            preds = run_forward_predictions(
-                setup=setup,
-                forcing=forcing_mod,
-                total_days=args.total_days,
-                save_interval=1.0,
-            )
+        forcing_mod, _ = make_modified_forcing(
+            setup.forcing,
+            u_snow=dummy_u_snow,
+            use_sst=True,
+            u_sst=delta_sst,
+        )
 
-            t850_pred = extract_t850_from_predictions(preds)
+        preds = run_forward_predictions(
+            setup=setup,
+            forcing=forcing_mod,
+            total_days=args.total_days,
+            save_interval=1.0,
+        )
 
-            # RMSE
-            diff = t850_pred - target_t850
-            rmse = jnp.sqrt(jnp.mean(diff**2))
+        t850_pred = extract_t850_from_predictions(preds)
 
-            total_loss += rmse
+        diff = t850_pred - target_t850
+        rmse = jnp.sqrt(jnp.mean(diff**2))
 
-            loss = total_loss / len(INIT_TIMES)
-            rmse = loss
+        total_rmse += rmse
 
-            # --- REGULARIZATION ---
-            reg_l2 = jnp.mean(delta_sst**2)
+    # ------------------------
+    # Average RMSE (IMPORTANT: outside loop)
+    # ------------------------
+    rmse = total_rmse / len(INIT_TIMES)
 
-            dx = delta_sst[1:, :] - delta_sst[:-1, :]
-            dy = delta_sst[:, 1:] - delta_sst[:, :-1]
-            reg_smooth = jnp.mean(dx**2) + jnp.mean(dy**2)
+    # ------------------------
+    # Regularization (ONLY ONCE)
+    # ------------------------
+    reg_l2 = jnp.mean(delta_sst**2)
 
-            # --- TOTAL LOSS ---
-            loss = rmse + args.lambda_l2 * reg_l2 + args.lambda_smooth * reg_smooth
+    dx = delta_sst[1:, :] - delta_sst[:-1, :]
+    dy = delta_sst[:, 1:] - delta_sst[:, :-1]
+    reg_smooth = jnp.mean(dx**2) + jnp.mean(dy**2)
 
-            info = {"delta_sst": delta_sst}
+    # ------------------------
+    # Final loss
+    # ------------------------
+    loss = rmse + args.lambda_l2 * reg_l2 + args.lambda_smooth * reg_smooth
 
-            return loss, (rmse, reg_l2, reg_smooth, info)
+    info = {"delta_sst": delta_sst}
+
+    return loss, (rmse, reg_l2, reg_smooth, info)
 
     def step(param_dict, opt_state):
         (loss, (rmse, reg_l2, reg_smooth, info)), grads = jax.value_and_grad(loss_fn, has_aux=True)(param_dict)
