@@ -56,7 +56,15 @@ def main():
     base_outdir = "/home/gmathieu/extras/outputs_uqam/jcm_experiments/optimisation"
 
     lr_tag = str(args.lr).replace(".", "p").replace("-", "m")
-    reg_tag = "noreg" if args.lambda_l2 == 0 and args.lambda_smooth == 0 else "reg"
+    def format_lambda(x):
+        return str(x).replace(".", "p").replace("-", "m")
+
+    if args.lambda_l2 == 0 and args.lambda_smooth == 0:
+        reg_tag = "noreg"
+    else:
+        l2_tag = format_lambda(args.lambda_l2)
+        sm_tag = format_lambda(args.lambda_smooth)
+        reg_tag = f"l2_{l2_tag}_sm_{sm_tag}"
     scope_tag = "nh30" if args.regional_loss else "global"
 
     outdir = os.path.join(
@@ -155,13 +163,22 @@ def main():
 
             total_loss += rmse
 
-        loss = total_loss / len(INIT_TIMES)
-        rmse = loss
-        reg_l2 = jnp.array(0.0)
-        reg_smooth = jnp.array(0.0)
-        info = {"delta_sst": delta_sst}
+            loss = total_loss / len(INIT_TIMES)
+            rmse = loss
 
-        return loss, (rmse, reg_l2, reg_smooth, info)
+            # --- REGULARIZATION ---
+            reg_l2 = jnp.mean(delta_sst**2)
+
+            dx = delta_sst[1:, :] - delta_sst[:-1, :]
+            dy = delta_sst[:, 1:] - delta_sst[:, :-1]
+            reg_smooth = jnp.mean(dx**2) + jnp.mean(dy**2)
+
+            # --- TOTAL LOSS ---
+            loss = rmse + args.lambda_l2 * reg_l2 + args.lambda_smooth * reg_smooth
+
+            info = {"delta_sst": delta_sst}
+
+            return loss, (rmse, reg_l2, reg_smooth, info)
 
     def step(param_dict, opt_state):
         (loss, (rmse, reg_l2, reg_smooth, info)), grads = jax.value_and_grad(loss_fn, has_aux=True)(param_dict)
