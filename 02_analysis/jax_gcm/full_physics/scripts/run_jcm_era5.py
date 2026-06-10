@@ -157,7 +157,14 @@ def main():
             )
 
         ds_chunk = predictions.to_xarray(physics_module=model.physics)
-        ds_chunk.to_netcdf(chunk_file)
+
+        # 🔥 IMPORTANT
+        ds_chunk = ds_chunk.compute()
+
+        ds_chunk.to_netcdf(
+            chunk_file,
+            engine="h5netcdf"
+        )
         chunk_paths.append(chunk_file)
         print(f"   Saved → {chunk_file}  "
               f"(T range: {float(ds_chunk['temperature'].min()):.1f}–"
@@ -173,7 +180,13 @@ def main():
     print(f"Concatenating {len(chunk_paths)} chunks → {out_path}")
     datasets = [xr.open_dataset(p) for p in chunk_paths]
     ds_full  = xr.concat(datasets, dim="time")
-    ds_full.to_netcdf(out_path)
+
+    ds_full = ds_full.compute()
+
+    ds_full.to_netcdf(
+        out_path,
+        engine="h5netcdf"
+    )
     for d in datasets:
         d.close()
 

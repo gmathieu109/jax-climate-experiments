@@ -77,6 +77,13 @@ def main():
     print("Building full setup...")
     setup = make_full_setup(init_time=args.init_time)
 
+    print(type(setup.terrain))
+
+    print("terrain attrs:")
+    print(dir(setup.terrain))
+
+    print("fmask exists:", hasattr(setup.terrain, "fmask"))
+
 
     print("Preparing ERA5 target T850...")
     target_t850, lat_deg, lon_deg = load_era5_target_t850(
@@ -109,6 +116,24 @@ def main():
     params = {
         "u_sst": jnp.zeros_like(setup.forcing.alb0)
     }
+    # Ocean mask for SST optimization.
+    # terrain.fmask = land fraction (0=ocean, 1=land)
+    land_mask = jnp.asarray(setup.terrain.fmask)
+
+    # Convert fractional land-sea mask into a strict binary ocean mask.
+    ocean_mask = (land_mask < 0.5).astype(jnp.float32)
+    land_mask = 1.0 - ocean_mask
+
+    np.save(os.path.join(outdir, "land_mask.npy"), np.asarray(land_mask))
+    np.save(os.path.join(outdir, "ocean_mask.npy"), np.asarray(ocean_mask))
+
+    print("Mask summary:")
+    print("  land_mask shape =", land_mask.shape)
+    print("  ocean_mask shape =", ocean_mask.shape)
+    print("  ocean fraction =", float(jnp.mean(ocean_mask)))
+    print("  land fraction =", float(jnp.mean(land_mask)))
+    print("  ocean min/max =", float(jnp.min(ocean_mask)), float(jnp.max(ocean_mask)))
+    print("  land min/max =", float(jnp.min(land_mask)), float(jnp.max(land_mask)))
 
     optimizer = optax.chain(
     optax.clip_by_global_norm(1.0),
@@ -121,74 +146,76 @@ def main():
         reg_lat = jnp.mean((field_2d[:, 1:] - field_2d[:, :-1]) ** 2)
         return reg_lon + reg_lat
 
-def loss_fn(params):
-    u_sst = params["u_sst"]
-    delta_sst = 2.0 * jnp.tanh(u_sst)
+    weights_jax = jnp.asarray(weights)
 
-    total_rmse = 0.0
+    def loss_fn(params):
+        u_sst = params["u_sst"]
+        delta_sst = 4.0 * jnp.tanh(u_sst) * ocean_mask
 
-    # ------------------------
-    # Loop over init times
-    # ------------------------
-    for init_time in INIT_TIMES:
-        setup = make_full_setup(init_time=init_time)
+        total_rmse = 0.0
 
-        target_t850, _, _ = load_era5_target_t850(
-            setup.coords,
-            init_time=init_time,
-            total_days=args.total_days,
-        )
+        for init_time in INIT_TIMES:
+            setup = make_full_setup(init_time=init_time)
 
-        dummy_u_snow = jnp.zeros_like(setup.forcing.alb0)
+            target_t850, _, _ = load_era5_target_t850(
+                setup.coords,
+                init_time=init_time,
+                total_days=args.total_days,
+            )
 
-        forcing_mod, _ = make_modified_forcing(
-            setup.forcing,
-            u_snow=dummy_u_snow,
-            use_sst=True,
-            u_sst=delta_sst,
-        )
+            dummy_u_snow = jnp.zeros_like(setup.forcing.alb0)
 
-        preds = run_forward_predictions(
-            setup=setup,
-            forcing=forcing_mod,
-            total_days=args.total_days,
-            save_interval=1.0,
-        )
+            forcing_mod, _ = make_modified_forcing(
+                setup.forcing,
+                u_snow=dummy_u_snow,
+                use_sst=True,
+                u_sst=delta_sst,
+            )
 
-        t850_pred = extract_t850_from_predictions(preds)
+            preds = run_forward_predictions(
+                setup=setup,
+                forcing=forcing_mod,
+                total_days=args.total_days,
+                save_interval=1.0,
+            )
 
-        diff = t850_pred - target_t850
-        rmse = jnp.sqrt(jnp.mean(diff**2))
+            t850_pred = extract_t850_from_predictions(preds)
 
-        total_rmse += rmse
+            nt = min(t850_pred.shape[0], target_t850.shape[0])
+            t850_pred = t850_pred[:nt]
+            target_t850 = target_t850[:nt]
 
-    # ------------------------
-    # Average RMSE (IMPORTANT: outside loop)
-    # ------------------------
-    rmse = total_rmse / len(INIT_TIMES)
+            rmse = weighted_rmse(t850_pred, target_t850, weights_jax)
+            total_rmse += rmse
 
-    # ------------------------
-    # Regularization (ONLY ONCE)
-    # ------------------------
-    reg_l2 = jnp.mean(delta_sst**2)
+        rmse = total_rmse / len(INIT_TIMES)
 
-    dx = delta_sst[1:, :] - delta_sst[:-1, :]
-    dy = delta_sst[:, 1:] - delta_sst[:, :-1]
-    reg_smooth = jnp.mean(dx**2) + jnp.mean(dy**2)
+        reg_l2 = jnp.sum(delta_sst**2 * ocean_mask) / (jnp.sum(ocean_mask) + 1e-8)
 
-    # ------------------------
-    # Final loss
-    # ------------------------
-    loss = rmse + args.lambda_l2 * reg_l2 + args.lambda_smooth * reg_smooth
+        dx = delta_sst[1:, :] - delta_sst[:-1, :]
+        dy = delta_sst[:, 1:] - delta_sst[:, :-1]
 
-    info = {"delta_sst": delta_sst}
+        mask_x = ocean_mask[1:, :] * ocean_mask[:-1, :]
+        mask_y = ocean_mask[:, 1:] * ocean_mask[:, :-1]
 
-    return loss, (rmse, reg_l2, reg_smooth, info)
+        reg_smooth_x = jnp.sum(dx**2 * mask_x) / (jnp.sum(mask_x) + 1e-8)
+        reg_smooth_y = jnp.sum(dy**2 * mask_y) / (jnp.sum(mask_y) + 1e-8)
+
+        reg_smooth = reg_smooth_x + reg_smooth_y
+
+        loss = rmse + args.lambda_l2 * reg_l2 + args.lambda_smooth * reg_smooth
+
+        info = {"delta_sst": delta_sst}
+
+        return loss, (rmse, reg_l2, reg_smooth, info)
 
     def step(param_dict, opt_state):
         (loss, (rmse, reg_l2, reg_smooth, info)), grads = jax.value_and_grad(loss_fn, has_aux=True)(param_dict)
         updates, opt_state = optimizer.update(grads, opt_state, param_dict)
         param_dict = optax.apply_updates(param_dict, updates)
+        param_dict = {
+            "u_sst": param_dict["u_sst"] * ocean_mask
+        }
         return param_dict, opt_state, loss, rmse, reg_l2, reg_smooth, info, grads
 
     # ------------------------
@@ -203,7 +230,7 @@ def loss_fn(params):
         u_snow=dummy_u_snow,
         use_albedo=False,
         use_sst=True,
-        u_sst=2.0 * jnp.tanh(params["u_sst"]),
+        u_sst=4.0 * jnp.tanh(params["u_sst"]) * ocean_mask,
     )
 
     preds = run_forward_predictions(
@@ -214,6 +241,9 @@ def loss_fn(params):
     )
 
     t850_pred = extract_t850_from_predictions(preds)
+
+    print("pred mean:", float(jnp.mean(t850_pred)))
+    print("target mean:", float(jnp.mean(target_t850)))
 
     print("t850_pred shape:", t850_pred.shape)
     print("target_t850 shape:", target_t850.shape)
@@ -298,7 +328,7 @@ def loss_fn(params):
 
     dummy_u_snow = jnp.zeros_like(setup.forcing.alb0)
 
-    delta_sst_final = 2.0 * jnp.tanh(params["u_sst"])
+    delta_sst_final = 4.0 * jnp.tanh(params["u_sst"]) * ocean_mask
 
     outfile = os.path.join(outdir, "delta_sst_final.npy")
     np.save(outfile, np.asarray(delta_sst_final))

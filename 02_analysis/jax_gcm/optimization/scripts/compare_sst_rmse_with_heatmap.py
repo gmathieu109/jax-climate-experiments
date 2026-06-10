@@ -58,7 +58,14 @@ def plot_heatmap(df: pd.DataFrame):
     )
 
     fig, ax = plt.subplots(figsize=(8, 5))
-    im = ax.imshow(pivot.values, aspect="auto", origin="lower")
+    im = ax.imshow(
+        pivot.values,
+        aspect="auto",
+        origin="lower",
+        cmap="RdYlGn",
+        vmin=0,
+        vmax=7
+    )
 
     ax.set_xticks(np.arange(len(pivot.columns)))
     ax.set_xticklabels([str(x) for x in pivot.columns])
@@ -67,7 +74,9 @@ def plot_heatmap(df: pd.DataFrame):
 
     ax.set_xlabel("Learning rate")
     ax.set_ylabel("lambda_smooth")
-    ax.set_title("RMSE improvement heatmap — 5d, 40 steps")
+    ax.set_title(
+        "RMSE improvement (%)\n5-day optimization window, 40 optimization steps"
+    )
 
     for i in range(len(pivot.index)):
         for j in range(len(pivot.columns)):
@@ -76,7 +85,7 @@ def plot_heatmap(df: pd.DataFrame):
                 ax.text(j, i, f"{val:.1f}%", ha="center", va="center")
 
     cbar = plt.colorbar(im, ax=ax)
-    cbar.set_label("RMSE improvement [%]")
+    cbar.set_label("RMSE reduction [%]")
 
     out = os.path.join(OPTIM_DIR, "comparison_plots", "heatmap_5d_steps40_lr_vs_smooth.png")
     plt.tight_layout()

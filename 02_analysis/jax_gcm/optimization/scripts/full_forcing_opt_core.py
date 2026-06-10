@@ -298,11 +298,11 @@ def cosine_lat_weights(lat_deg: np.ndarray, nlon: int) -> jnp.ndarray:
     return jnp.asarray(w_2d)
 
 
-def weighted_rmse(pred: jnp.ndarray, target: jnp.ndarray, weights_2d: jnp.ndarray) -> jnp.ndarray:
-    """
-    pred, target: (time, lon, lat)
-    weights_2d:   (lon, lat)
-    """
+def weighted_rmse(pred, target, weights_2d):
     err2 = (pred - target) ** 2
-    weighted = err2 * weights_2d[None, :, :]
-    return jnp.sqrt(jnp.mean(weighted))
+    w = weights_2d[None, :, :]  # (1, lon, lat)
+
+    weighted_sum = jnp.sum(w * err2)
+    weight_sum = jnp.sum(w) * pred.shape[0]  # 🔥 IMPORTANT
+
+    return jnp.sqrt(weighted_sum / weight_sum)
