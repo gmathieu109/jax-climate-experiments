@@ -64,7 +64,7 @@ def plot_heatmap(df: pd.DataFrame):
         origin="lower",
         cmap="RdYlGn",
         vmin=0,
-        vmax=7
+        vmax=10
     )
 
     ax.set_xticks(np.arange(len(pivot.columns)))

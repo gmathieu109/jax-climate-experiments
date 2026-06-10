@@ -19,6 +19,23 @@ def symmetric_vmax(arr: np.ndarray, floor: float = 1e-8) -> float:
     vmax = float(np.max(np.abs(arr)))
     return max(vmax, floor)
 
+def load_ocean_mask(run_dir: str, shape: tuple[int, int]) -> np.ndarray | None:
+    mask_path = os.path.join(run_dir, "ocean_mask.npy")
+
+    if not os.path.exists(mask_path):
+        print("WARNING: ocean_mask.npy not found. Plotting unmasked delta_sst.")
+        return None
+
+    mask = np.load(mask_path)
+
+    if mask.shape != shape:
+        print("WARNING: ocean_mask.npy shape does not match delta_sst shape.")
+        print("  mask shape :", mask.shape)
+        print("  delta shape:", shape)
+        print("  Plotting unmasked delta_sst.")
+        return None
+
+    return mask
 
 def load_metrics(metrics_path: str):
     m = np.load(metrics_path, allow_pickle=True).item()
@@ -71,16 +88,24 @@ def main():
     # Figure 2: final delta_sst
     # -------------------------
     delta = np.load(final_path)
+    ocean_mask = load_ocean_mask(run_dir, delta.shape)
+
+    if ocean_mask is not None:
+        delta_plot = np.where(ocean_mask == 1, delta, np.nan)
+    else:
+        delta_plot = delta
 
     print("delta_sst_final shape:", delta.shape)
     print("delta_sst_final mean/min/max:",
-          float(delta.mean()), float(delta.min()), float(delta.max()))
+        float(np.nanmean(delta_plot)),
+        float(np.nanmin(delta_plot)),
+        float(np.nanmax(delta_plot)))
 
-    vmax = symmetric_vmax(delta)
+    vmax = symmetric_vmax(delta_plot[np.isfinite(delta_plot)])
 
     plt.figure(figsize=(10, 4.5))
     im = plt.imshow(
-        delta.T,
+        delta_plot.T,
         origin="lower",
         aspect="auto",
         vmin=-vmax,
@@ -111,10 +136,12 @@ def main():
         labels = []
         for it, f in chosen:
             d = np.load(f)
+            if ocean_mask is not None:
+                d = np.where(ocean_mask == 1, d, np.nan)
             deltas.append(d)
             labels.append(f"iter {it}")
 
-        vmax_ckpt = max(symmetric_vmax(d) for d in deltas)
+        vmax_ckpt = max(symmetric_vmax(d[np.isfinite(d)]) for d in deltas)
 
         fig, axes = plt.subplots(1, len(deltas), figsize=(4 * len(deltas), 4), constrained_layout=True)
         if len(deltas) == 1:

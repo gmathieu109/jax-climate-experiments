@@ -53,7 +53,7 @@ def main():
 )
     args = parser.parse_args()
 
-    base_outdir = "/home/gmathieu/extras/outputs_uqam/jcm_experiments/optimisation"
+    base_outdir = "/home/gmathieu/extras/outputs_uqam/jcm_experiments/optimisation_sst_masked"
 
     lr_tag = str(args.lr).replace(".", "p").replace("-", "m")
     def format_lambda(x):
@@ -67,22 +67,23 @@ def main():
         reg_tag = f"l2_{l2_tag}_sm_{sm_tag}"
     scope_tag = "nh30" if args.regional_loss else "global"
 
+    init_tag = args.init_time.split("T")[0]
+
     outdir = os.path.join(
         base_outdir,
-        f"delta_sst_{args.total_days}d_steps{args.n_steps}_lr{lr_tag}_{reg_tag}_{scope_tag}"
+        f"delta_sst_masked_"
+        f"init{init_tag}_"
+        f"{args.total_days}d_"
+        f"steps{args.n_steps}_"
+        f"lr{lr_tag}_"
+        f"{reg_tag}_"
+        f"{scope_tag}"
     )
 
     os.makedirs(outdir, exist_ok=True)
     print("Output directory:", outdir)
     print("Building full setup...")
     setup = make_full_setup(init_time=args.init_time)
-
-    print(type(setup.terrain))
-
-    print("terrain attrs:")
-    print(dir(setup.terrain))
-
-    print("fmask exists:", hasattr(setup.terrain, "fmask"))
 
 
     print("Preparing ERA5 target T850...")
