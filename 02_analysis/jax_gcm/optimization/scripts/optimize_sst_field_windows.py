@@ -53,7 +53,7 @@ def main():
 )
     args = parser.parse_args()
 
-    base_outdir = "/home/gmathieu/extras/outputs_uqam/jcm_experiments/optimisation_sst_masked"
+    base_outdir = "/cuyo/gmathieu/outputs_uqam/jcm_experiments/optimisation_sst_masked"
 
     lr_tag = str(args.lr).replace(".", "p").replace("-", "m")
     def format_lambda(x):

@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 # Directory containing optimization runs
-OPTIM_DIR = "/home/gmathieu/extras/outputs_uqam/jcm_experiments/optimisation"
+OPTIM_DIR = "/cuyo/gmathieu/outputs_uqam/jcm_experiments/optimisation_sst_masked"
 
 
 def extract_config_from_dirname(dirname: str) -> dict:
@@ -108,7 +108,7 @@ def load_sst_results() -> pd.DataFrame:
         print(f"Directory not found: {OPTIM_DIR}")
         return pd.DataFrame()
     
-    sst_dirs = [d for d in os.listdir(OPTIM_DIR) if d.startswith("delta_sst_")]
+    sst_dirs = [d for d in os.listdir(OPTIM_DIR) if d.startswith("delta_sst_masked")]
     
     print(f"Found {len(sst_dirs)} SST optimization runs")
     
